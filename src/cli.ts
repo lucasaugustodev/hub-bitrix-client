@@ -81,16 +81,17 @@ const ENTITIES: EntityConfig[] = [
   {
     name: "task",
     description: "Tasks",
-    methodPrefix: "task.item",
-    listMethod: "task.item.list",
-    getMethod: "task.item.getdata",
-    addMethod: "task.item.add",
-    updateMethod: "task.item.update",
-    deleteMethod: "task.item.delete",
-    fieldsMethod: "task.item.getfields",
-    defaultSelect: ["ID", "TITLE", "STATUS", "RESPONSIBLE_ID", "DEADLINE", "CREATED_DATE"],
+    methodPrefix: "tasks.task",
+    listMethod: "tasks.task.list",
+    getMethod: "tasks.task.get",
+    addMethod: "tasks.task.add",
+    updateMethod: "tasks.task.update",
+    deleteMethod: "tasks.task.delete",
+    fieldsMethod: "tasks.task.getfields",
+    defaultSelect: ["id", "title", "status", "responsibleId", "deadline", "createdDate"],
     idParam: "taskId",
-    searchField: "TITLE",
+    searchField: "title",
+    listResultKey: "tasks",
   },
   {
     name: "user",
@@ -135,21 +136,56 @@ function printKeyValue(obj: Record<string, unknown>) {
   }
 }
 
-function extractItems(result: any): any[] {
+function unwrapResponse(result: any): any {
+  // API returns { status, method, data } where data is the Bitrix response
+  // data can be: array (list results), object with .result, or raw value
+  if (result?.status === "success" && result.data !== undefined) return result.data;
+  if (result?.status === "blocked") return result;
+  if (result?.status === "pending_approval") return result;
+  return result;
+}
+
+function extractItems(raw: any): any[] {
+  const result = unwrapResponse(raw);
   if (!result) return [];
+  if (Array.isArray(result)) return result;
+  // Direct array result from Bitrix
   if (Array.isArray(result.result)) return result.result;
+  // Nested result like { tasks: [...] } or { result: { tasks: [...] } }
   if (result.result && typeof result.result === "object" && !Array.isArray(result.result)) {
-    // Some methods return { result: { tasks: [...] } } etc.
     const keys = Object.keys(result.result);
-    if (keys.length === 1 && Array.isArray(result.result[keys[0]])) {
-      return result.result[keys[0]];
+    if (keys.length >= 1) {
+      for (const k of keys) {
+        if (Array.isArray(result.result[k])) return result.result[k];
+      }
     }
     return [result.result];
+  }
+  // Top-level nested like { tasks: [...] } (when API unwraps .result)
+  if (typeof result === "object") {
+    for (const k of Object.keys(result)) {
+      if (Array.isArray(result[k]) && k !== "time") return result[k];
+    }
   }
   return [];
 }
 
+function extractTotal(raw: any): { total?: number; next?: number } {
+  const result = unwrapResponse(raw);
+  return { total: result?.total, next: result?.next };
+}
+
 function printListResult(result: any, selectFields?: string[], json?: boolean) {
+  // Handle blocked/pending from the pipeline
+  if (result?.status === "blocked") {
+    console.log(chalk.red(`x Blocked: ${result.error}`));
+    return;
+  }
+  if (result?.status === "pending_approval") {
+    console.log(chalk.yellow(`! Requires approval. ID: ${result.approvalId}`));
+    return;
+  }
+
   if (json) {
     console.log(JSON.stringify(result, null, 2));
     return;
@@ -173,23 +209,25 @@ function printListResult(result: any, selectFields?: string[], json?: boolean) {
   const rows = items.map(item => headers.map(h => String(item[h] ?? "")));
   printTable(headers, rows);
 
+  const { total, next } = extractTotal(result);
   const parts: string[] = [];
-  if (result.total !== undefined) parts.push(`Total: ${result.total}`);
+  if (total !== undefined) parts.push(`Total: ${total}`);
   parts.push(`Showing: ${items.length}`);
-  if (result.next !== undefined) parts.push(`Next offset: ${result.next}`);
+  if (next !== undefined) parts.push(`Next offset: ${next}`);
   console.log(chalk.blue(`  ${parts.join(" | ")}`));
 }
 
-function printSingleItem(result: any, json?: boolean) {
+function printSingleItem(raw: any, json?: boolean) {
+  const data = unwrapResponse(raw);
   if (json) {
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify(data, null, 2));
     return;
   }
-  const item = result?.result ?? result;
+  const item = data?.result ?? data;
   if (typeof item === "object" && item !== null) {
     printKeyValue(item);
   } else {
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify(data, null, 2));
   }
 }
 
@@ -361,11 +399,14 @@ function registerEntity(program: Command, cfg: EntityConfig) {
           if (opts.json) {
             console.log(JSON.stringify(result, null, 2));
           } else {
-            const approvalId = result?.approval_id ?? result?.result;
-            console.log(chalk.yellow(`Delete request submitted for ${cfg.name} ${id}.`));
-            if (approvalId) {
-              console.log(chalk.yellow(`Approval ID: ${approvalId}`));
-              console.log(chalk.dim(`Check status with: hub-bitrix status ${approvalId}`));
+            if (result?.status === "blocked") {
+              console.log(chalk.red(`x Blocked: ${result.error}`));
+            } else if (result?.status === "pending_approval") {
+              console.log(chalk.yellow(`! Delete requires admin approval.`));
+              console.log(chalk.blue(`  Approval ID: ${result.approvalId}`));
+              console.log(chalk.dim(`  Check status: hub-bitrix status ${result.approvalId}`));
+            } else {
+              console.log(chalk.green(`Delete completed for ${cfg.name} ${id}.`));
             }
           }
         } catch (e) { err(e); }
@@ -413,42 +454,59 @@ program
         console.log(JSON.stringify(result, null, 2));
         return;
       }
-      const items: any[] = Array.isArray(result) ? result : result.entities ?? [];
+      const data = unwrapResponse(result);
+      const items: any[] = Array.isArray(data) ? data : data?.entities ?? data?.modules ?? [];
       if (items.length === 0) {
         console.log(chalk.yellow("No modules found."));
         return;
       }
-      if (typeof items[0] === "string") {
-        printTable(["#", "Module"], items.map((e: string, i: number) => [String(i + 1), e]));
-      } else {
-        const headers = Object.keys(items[0]);
-        const rows = items.map((item: any) => headers.map(h => String(item[h] ?? "")));
-        printTable(headers, rows);
-      }
-      console.log(chalk.blue(`  Total modules: ${items.length}`));
+      // Format nicely: name, description, method count
+      const rows = items.map((m: any, i: number) => {
+        const methods = Array.isArray(m.methods) ? m.methods : (typeof m.methods === 'string' ? m.methods.split(',') : []);
+        return [
+          String(i + 1),
+          chalk.bold(m.name || m),
+          m.description || '',
+          String(methods.length),
+        ];
+      });
+      printTable(["#", "Module", "Description", "Methods"], rows);
+      console.log(chalk.blue(`  Total: ${items.length} modules`));
     } catch (e) { err(e); }
   });
 
 // methods
 program
   .command("methods")
-  .description("List all methods in a module")
-  .argument("<module>", "Module name (e.g., crm, task, user)")
+  .description("List all methods in a permission module")
+  .argument("<module>", "Module name (e.g., deals, contacts, tasks)")
   .option("--json", "Raw JSON output")
   .action(async (mod: string, opts) => {
     try {
-      const result = await call("methods", { module: mod });
-      if (opts.json) {
-        console.log(JSON.stringify(result, null, 2));
+      const result = await listEntities();
+      const data = unwrapResponse(result);
+      const items: any[] = Array.isArray(data) ? data : data?.entities ?? data?.modules ?? [];
+      const found = items.find((m: any) => m.name === mod);
+      if (!found) {
+        console.log(chalk.red(`Module "${mod}" not found.`));
+        console.log(chalk.blue(`Available: ${items.map((m: any) => m.name).join(", ")}`));
         return;
       }
-      const methods = result?.result ?? result;
-      if (Array.isArray(methods)) {
-        methods.forEach((m: string, i: number) => console.log(`  ${chalk.dim(String(i + 1).padStart(3))}  ${m}`));
-        console.log(chalk.blue(`\n  Total methods: ${methods.length}`));
-      } else {
+      const methods: string[] = Array.isArray(found.methods) ? found.methods : [];
+      if (opts.json) {
         console.log(JSON.stringify(methods, null, 2));
+        return;
       }
+      console.log(chalk.bold(`\n  Module: ${found.name}`));
+      console.log(chalk.dim(`  ${found.description}\n`));
+      methods.sort().forEach((m: string, i: number) => {
+        const color = m.includes(".delete") ? chalk.red
+          : m.includes(".add") || m.includes(".update") || m.includes(".set") ? chalk.yellow
+          : chalk.green;
+        console.log(`  ${chalk.dim(String(i + 1).padStart(3))}  ${color(m)}`);
+      });
+      console.log(chalk.blue(`\n  Total: ${methods.length} methods`));
+      console.log(chalk.dim(`  ${chalk.green("green")}=read  ${chalk.yellow("yellow")}=write  ${chalk.red("red")}=delete`));
     } catch (e) { err(e); }
   });
 
@@ -524,7 +582,8 @@ program
       const filter = parseJsonOpt(opts.filter);
       const params: Record<string, unknown> = { filter, select: ["ID"], limit: 1 };
       const result = await call(methodFor(cfg, "list"), params);
-      const total = result?.total ?? "unknown";
+      const data = unwrapResponse(result);
+      const total = data?.total ?? "unknown";
       console.log(chalk.green(`${cfg.description}: ${total} items`));
     } catch (e) { err(e); }
   });
