@@ -1,0 +1,30 @@
+{
+  "name": "hub-bitrix-client",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "CLI + MCP client for Hub Bitrix - Bitrix24 governance with traceability and security",
+  "bin": {
+    "hub-bitrix": "dist/cli.js"
+  },
+  "main": "dist/mcp.js",
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch"
+  },
+  "dependencies": {
+    "commander": "^13.0.0",
+    "chalk": "^5.4.0",
+    "cli-table3": "^0.6.5",
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "tsup": "^8.4.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}
