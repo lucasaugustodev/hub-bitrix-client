@@ -19,8 +19,6 @@ npx hub-bitrix-client <command>
 | `HUB_BITRIX_API_KEY` | **Yes** | — | API key for authenticating with Hub Bitrix |
 | `HUB_BITRIX_API_URL` | No | `https://bitrix.somosahub.us` | Hub Bitrix server URL (override for local dev) |
 
-Set them in your shell or `.env`:
-
 ```bash
 export HUB_BITRIX_API_KEY=your_api_key_here
 export HUB_BITRIX_API_URL=https://bitrix.somosahub.us  # optional
@@ -28,76 +26,115 @@ export HUB_BITRIX_API_URL=https://bitrix.somosahub.us  # optional
 
 ## CLI Usage
 
-### General
+### Entity Commands
+
+Every entity supports the same set of subcommands:
+
+| Subcommand | Description |
+|---|---|
+| `hub-bitrix <entity> list` | List items with filtering, sorting, pagination |
+| `hub-bitrix <entity> get <id>` | Get a single item by ID |
+| `hub-bitrix <entity> fields` | Show all available fields (type, required, read-only) |
+| `hub-bitrix <entity> add -d '{...}'` | Create a new item |
+| `hub-bitrix <entity> update <id> -d '{...}'` | Update an existing item |
+| `hub-bitrix <entity> delete <id>` | Delete (goes to approval queue) |
+
+### Supported Entities
+
+| Entity | Bitrix Method Prefix | Default Fields |
+|---|---|---|
+| `deal` | `crm.deal` | ID, TITLE, STAGE_ID, OPPORTUNITY, ASSIGNED_BY_ID, DATE_CREATE |
+| `contact` | `crm.contact` | ID, NAME, LAST_NAME, PHONE, EMAIL, DATE_CREATE |
+| `company` | `crm.company` | ID, TITLE, PHONE, EMAIL, DATE_CREATE |
+| `lead` | `crm.lead` | ID, TITLE, STATUS_ID, NAME, LAST_NAME, DATE_CREATE |
+| `activity` | `crm.activity` | ID, SUBJECT, TYPE_ID, COMPLETED, RESPONSIBLE_ID, CREATED |
+| `invoice` | `crm.invoice` | ID, ORDER_TOPIC, STATUS_ID, PRICE, DATE_INSERT |
+| `quote` | `crm.quote` | ID, TITLE, STATUS_ID, OPPORTUNITY, DATE_CREATE |
+| `product` | `crm.product` | ID, NAME, PRICE, CURRENCY_ID, ACTIVE |
+| `task` | `task.item` | ID, TITLE, STATUS, RESPONSIBLE_ID, DEADLINE, CREATED_DATE |
+| `user` | `user` | ID, NAME, LAST_NAME, EMAIL, ACTIVE |
+
+### List Options
+
+All `list` subcommands accept:
+
+| Flag | Short | Description |
+|---|---|---|
+| `--filter <json>` | `-f` | JSON filter (e.g., `'{"STAGE_ID":"WON"}'`) |
+| `--select <fields>` | `-s` | Comma-separated fields (e.g., `"ID,TITLE,STAGE_ID"`) |
+| `--order <json>` | `-o` | JSON ordering (e.g., `'{"ID":"DESC"}'`) |
+| `--limit <n>` | `-l` | Max items (default 50) |
+| `--all` | `-a` | Fetch ALL pages via auto-pagination |
+| `--json` | | Raw JSON output instead of table |
+
+### Examples
 
 ```bash
-# Check API health
-hub-bitrix health
-
-# List registered entity modules
-hub-bitrix entities
-
-# Call any Bitrix24 method
-hub-bitrix call <method> [--params '{}']
-
-# Call with automatic pagination (fetches all pages)
-hub-bitrix call-all <method> [--params '{}']
-
-# Check delete approval status
-hub-bitrix status <approval-id>
-```
-
-### Deal Shortcuts
-
-```bash
-# List deals
+# List deals, default fields
 hub-bitrix deal list
-hub-bitrix deal list --filter '{"STAGE_ID": "WON"}'
+
+# Filter won deals, order by ID desc
+hub-bitrix deal list -f '{"STAGE_ID":"WON"}' -o '{"ID":"DESC"}'
 
 # Get a specific deal
 hub-bitrix deal get 42
+
+# Show deal fields
+hub-bitrix deal fields
+
+# Create a new deal
+hub-bitrix deal add -d '{"TITLE":"New deal","STAGE_ID":"NEW"}'
+
+# Update a deal
+hub-bitrix deal update 42 -d '{"STAGE_ID":"WON"}'
+
+# Delete a deal (goes to approval)
+hub-bitrix deal delete 42
+
+# List contacts with custom select
+hub-bitrix contact list -s "ID,NAME,EMAIL" -l 100
+
+# Fetch ALL leads (auto-pagination)
+hub-bitrix lead list -a
+
+# Show product fields
+hub-bitrix product fields
+
+# List tasks for a user
+hub-bitrix task list -f '{"RESPONSIBLE_ID":1}'
+
+# Get all users as raw JSON
+hub-bitrix user list --json
 ```
 
-### Contact Shortcuts
+### Utility Commands
 
 ```bash
-# List contacts
-hub-bitrix contact list
-hub-bitrix contact list --filter '{"NAME": "John"}'
+# Quick search by name/title (uses %LIKE% matching)
+hub-bitrix search deal "Big Corp"
+hub-bitrix search contact "John"
 
-# Get a specific contact
-hub-bitrix contact get 17
-```
+# Count items matching a filter
+hub-bitrix count deal
+hub-bitrix count lead -f '{"STATUS_ID":"NEW"}'
 
-### Task Shortcuts
+# List permission modules
+hub-bitrix modules
 
-```bash
-# List tasks
-hub-bitrix task list
-hub-bitrix task list --filter '{"RESPONSIBLE_ID": 1}'
+# List methods in a module
+hub-bitrix methods crm
 
-# Get a specific task
-hub-bitrix task get 99
-```
+# Call any Bitrix24 method directly
+hub-bitrix call crm.deal.list -p '{"filter":{"STAGE_ID":"WON"},"select":["ID","TITLE"]}'
 
-### User Shortcuts
+# Call with auto-pagination
+hub-bitrix call-all crm.contact.list -p '{"select":["ID","NAME","EMAIL"]}'
 
-```bash
-# List all users
-hub-bitrix user list
-```
+# Check delete approval status
+hub-bitrix status <approval-id>
 
-### Examples with params
-
-```bash
-# List deals in a specific stage
-hub-bitrix call crm.deal.list --params '{"filter": {"STAGE_ID": "WON"}, "select": ["ID", "TITLE", "OPPORTUNITY"]}'
-
-# Get all contacts with pagination
-hub-bitrix call-all crm.contact.list --params '{"select": ["ID", "NAME", "LAST_NAME", "EMAIL"]}'
-
-# Get deal categories
-hub-bitrix call crm.dealcategory.list
+# API health check
+hub-bitrix health
 ```
 
 ## MCP (Claude Code Integration)
@@ -147,23 +184,10 @@ Or using npx:
 
 Hub Bitrix adds a governance layer on top of the Bitrix24 REST API:
 
-### Read Operations
-- All GET/list methods pass through directly with full audit logging
-- Results are traced per API key and user
-
-### Write Operations
-- INSERT/UPDATE operations execute normally but are captured in the audit trail
-- Before/after diffs are recorded for traceability
-
-### Delete Operations
-- DELETE requests require **admin approval** before execution
-- A `approval_id` is returned immediately — poll with `hub-bitrix status <id>` or `bitrix_delete_status`
-- Approvals can be reviewed and granted/denied through the Hub Bitrix admin panel
-
-### Module Permissions
-- Each API key can be scoped to specific entity modules
-- The `entities` command / `bitrix_list_entities` tool shows what your key can access
-- Unauthorized module access returns a 403 error
+- **Read operations** pass through directly with full audit logging
+- **Write operations** (add/update) execute normally but are captured in the audit trail with before/after diffs
+- **Delete operations** require admin approval — a `approval_id` is returned, poll with `hub-bitrix status <id>`
+- **Module permissions** scope each API key to specific entities; use `hub-bitrix modules` to see what your key can access
 
 ## Development
 
