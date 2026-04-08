@@ -51,7 +51,7 @@ Every entity supports the same set of subcommands:
 | `invoice` | `crm.invoice` | ID, ORDER_TOPIC, STATUS_ID, PRICE, DATE_INSERT |
 | `quote` | `crm.quote` | ID, TITLE, STATUS_ID, OPPORTUNITY, DATE_CREATE |
 | `product` | `crm.product` | ID, NAME, PRICE, CURRENCY_ID, ACTIVE |
-| `task` | `task.item` | ID, TITLE, STATUS, RESPONSIBLE_ID, DEADLINE, CREATED_DATE |
+| `task` | `tasks.task` | id, title, status, responsibleId, deadline, createdDate |
 | `user` | `user` | ID, NAME, LAST_NAME, EMAIL, ACTIVE |
 
 ### List Options
@@ -122,7 +122,7 @@ hub-bitrix count lead -f '{"STATUS_ID":"NEW"}'
 hub-bitrix modules
 
 # List methods in a module
-hub-bitrix methods crm
+hub-bitrix methods deals
 
 # Call any Bitrix24 method directly
 hub-bitrix call crm.deal.list -p '{"filter":{"STAGE_ID":"WON"},"select":["ID","TITLE"]}'
