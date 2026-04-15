@@ -272,7 +272,8 @@ function registerEntity(program: Command, cfg: EntityConfig) {
     .option("-s, --select <fields>", "Comma-separated fields")
     .option("-o, --order <json>", "JSON order object")
     .option("-l, --limit <n>", "Max items to return", "50")
-    .option("-a, --all", "Fetch ALL pages (auto-pagination)")
+    .option("-a, --all", "Fetch ALL pages (auto-pagination, default)")
+    .option("--no-all", "Disable auto-pagination, use single page")
     .option("--json", "Raw JSON output")
     .action(async (opts) => {
       try {
@@ -282,11 +283,15 @@ function registerEntity(program: Command, cfg: EntityConfig) {
           : cfg.defaultSelect;
         const params: Record<string, unknown> = { filter, select };
         if (opts.order) params.order = parseJsonOpt(opts.order);
-        if (!opts.all) params.start = 0;
-        if (!opts.all) params.limit = parseInt(opts.limit, 10);
+        // Default: auto-paginate (callAll). Use --no-all to disable.
+        const useAll = opts.all !== false;
+        if (!useAll) {
+          params.start = 0;
+          params.limit = parseInt(opts.limit, 10);
+        }
 
         const method = methodFor(cfg, "list");
-        const result = opts.all
+        const result = useAll
           ? await callAll(method, params)
           : await call(method, params);
 
@@ -561,7 +566,7 @@ program
         select: cfg.defaultSelect,
         limit: parseInt(opts.limit, 10),
       };
-      const result = await call(methodFor(cfg, "list"), params);
+      const result = await callAll(methodFor(cfg, "list"), params);
       printListResult(result, cfg.defaultSelect, opts.json);
     } catch (e) { err(e); }
   });
